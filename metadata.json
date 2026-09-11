@@ -1,0 +1,6 @@
+{
+  "name": "CryptoPulse Pro Analytics",
+  "description": "Real-time crypto market intelligence terminal with Top 50 live pairs, CoinGlass-style liquidity heatmap, institutional order blocks, net flows, portfolio tracker, breakout alerts, and MFA biometric security.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

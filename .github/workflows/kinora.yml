@@ -1,0 +1,75 @@
+name: Kinora validation
+on:
+  push:
+    branches: [kinora-android]
+    paths: ['kinora-android/**', '.github/workflows/kinora.yml']
+  pull_request:
+    paths: ['kinora-android/**', '.github/workflows/kinora.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: kinora-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  backend-and-camera:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: kinora-android/backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Backend tests
+        run: python -m unittest discover -s tests -v
+      - name: Install UI test dependencies
+        run: npm install --no-audit --no-fund
+      - name: Install browser
+        run: npx playwright install --with-deps chromium
+      - name: UI and WebRTC integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          KINORA_PORT=8765 KINORA_DB=/tmp/kinora-ci.sqlite3 python server.py > /tmp/kinora-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          python - <<'PY'
+          import time, urllib.request
+          for attempt in range(30):
+              try:
+                  urllib.request.urlopen('http://127.0.0.1:8765/health',timeout=1).close()
+                  break
+              except OSError:
+                  time.sleep(0.2)
+          else:
+              raise SystemExit('API did not start')
+          PY
+          npm run test:ui
+          npm run test:browser
+  android-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK packages
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Build and verify development APK
+        run: python kinora-android/build_apk.py
+      - name: Upload installable development APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kinora-development-APK
+          path: kinora-android/build/manual/Kinora-0.2.0-debug.apk
+          retention-days: 14
+          if-no-files-found: error

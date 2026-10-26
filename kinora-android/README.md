@@ -10,7 +10,7 @@ Original parental-control project. Working brand only; domain and trademark avai
 - No Internet permission, data uploads, embedded credentials or hidden monitoring.
 
 ## Not implemented
-Cross-device pairing, authentication, remote location sharing, notifications, app blocking and backend storage. The parent screen explicitly shows that no devices are connected. Daily goals are advisory, not enforced. This is not a finished FlashGet Kids equivalent.
+The [backend](backend/README.md) now implements authentication, secure pairing, persistent block/unblock commands and consent-gated camera signaling, with 13 passing automated tests. The Android client is not yet integrated. Remote location sharing, notifications, Android app-block enforcement and native WebRTC video remain unimplemented. The parent screen explicitly shows that no devices are connected. Daily goals are advisory, not enforced. This is not a finished FlashGet Kids equivalent.
 
 ## Build
 Open this directory in Android Studio with JDK 17, Android SDK 35 and Gradle 8.9.

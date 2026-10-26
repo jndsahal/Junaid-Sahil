@@ -7,6 +7,8 @@ import re
 import secrets
 import sqlite3
 import time
+import base64
+from pathlib import Path
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, parse_qs
@@ -43,6 +45,7 @@ CREATE TABLE IF NOT EXISTS policies(device_id TEXT REFERENCES devices(id) ON DEL
 CREATE TABLE IF NOT EXISTS cameras(id TEXT PRIMARY KEY, device_id TEXT REFERENCES devices(id) ON DELETE CASCADE, lens TEXT NOT NULL, state TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS signals(id INTEGER PRIMARY KEY AUTOINCREMENT, camera_id TEXT REFERENCES cameras(id) ON DELETE CASCADE, sender TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS limits(key TEXT PRIMARY KEY, count INTEGER NOT NULL, expires INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS telemetry(device_id TEXT PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE, payload TEXT NOT NULL, updated INTEGER NOT NULL);
 '''
 
 
@@ -157,6 +160,16 @@ class API:
                     raise Error(404, 'Device not found')
                 return row
 
+            if method == 'GET' and parts == ['rtc','config']:
+                urls = [x.strip() for x in os.environ.get('KINORA_TURN_URLS','').split(',') if x.strip()]
+                secret = os.environ.get('KINORA_TURN_SECRET','')
+                servers = []
+                if urls and secret:
+                    username = str(now+600)+':'+uid
+                    credential = base64.b64encode(hmac.new(secret.encode(),username.encode(),hashlib.sha1).digest()).decode()
+                    servers.append({'urls':urls,'username':username,'credential':credential})
+                return 200, {'iceServers':servers,'relayConfigured':bool(servers)}
+
             if method == 'POST' and parts == ['auth','logout']:
                 parent()
                 db.execute('DELETE FROM sessions WHERE token=?', (digest(token),))
@@ -178,6 +191,36 @@ class API:
             if len(parts) >= 2 and parts[0] == 'devices':
                 did = parts[1]
                 owned(did)
+                if parts[2:] == ['telemetry']:
+                    if method == 'POST':
+                        if role != 'device':
+                            raise Error(403,'Device report required')
+                        apps = body.get('apps',[])
+                        if not isinstance(apps,list) or len(apps)>300:
+                            raise Error(400,'Invalid app inventory')
+                        for item in apps:
+                            if not isinstance(item,dict): raise Error(400,'Invalid app')
+                            string(item,'package',200); string(item,'name',100)
+                            minutes = item.get('minutes',0)
+                            if type(minutes) is not int or minutes<0 or minutes>10080: raise Error(400,'Invalid usage')
+                        old=db.execute('SELECT payload FROM telemetry WHERE device_id=?',(did,)).fetchone()
+                        previous=json.loads(old['payload']) if old else {}
+                        location = body.get('location',previous.get('location'))
+                        location_at = now if 'location' in body else previous.get('location_at',0)
+                        if location_at<=now-86400: location=None
+                        if location is not None:
+                            if not isinstance(location,dict): raise Error(400,'Invalid location')
+                            for key,limit in [('latitude',90),('longitude',180)]:
+                                value=location.get(key)
+                                if type(value) not in (int,float) or not -limit<=value<=limit: raise Error(400,'Invalid coordinates')
+                        payload = json.dumps({'apps':apps,'location':location,'location_at':location_at,'managed':body.get('managed') is True,'usageEnabled':body.get('usageEnabled') is True})
+                        db.execute('INSERT INTO telemetry VALUES(?,?,?) ON CONFLICT(device_id) DO UPDATE SET payload=excluded.payload,updated=excluded.updated',(did,payload,now))
+                        return 200, {'updated':now}
+                    if method == 'GET':
+                        row=db.execute('SELECT * FROM telemetry WHERE device_id=? AND updated>?',(did,now-86400)).fetchone()
+                        report=json.loads(row['payload']) if row else None
+                        if report and report.get('location_at',0)<=now-86400: report['location']=None
+                        return 200, {'report':report,'updated':row['updated'] if row else None}
                 if len(parts) == 2 and method == 'DELETE':
                     # Both parent and child can revoke this device.
                     db.execute('DELETE FROM devices WHERE id=?', (did,))
@@ -291,6 +334,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def dispatch(self):
         try:
+            if self.command == 'GET' and urlsplit(self.path).path in ('/','/ui','/app.js','/style.css'):
+                name={'/':'index.html','/ui':'index.html','/app.js':'app.js','/style.css':'style.css'}[urlsplit(self.path).path]
+                data=(Path(__file__).parent/'web'/name).read_bytes()
+                self.send_response(200)
+                self.send_header('Content-Type',{'html':'text/html; charset=utf-8','js':'application/javascript','css':'text/css'}[name.split('.')[-1]])
+                self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; media-src 'self' blob:; frame-src 'none'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'")
+                self.send_header('Permissions-Policy','camera=(self), microphone=(), geolocation=(self)')
+                self.send_header('X-Content-Type-Options','nosniff')
+                self.send_header('Cache-Control','no-store')
+                self.send_header('Content-Length',str(len(data)))
+                self.end_headers(); self.wfile.write(data); return
             if self.headers.get('Transfer-Encoding'):
                 raise Error(400,'Transfer encoding not supported')
             try:

@@ -50,7 +50,8 @@ public class MainActivity extends Activity {
         });
         text("KINORA", 16, true);
         text("A little balance.\nMore family time.", 32, true);
-        text("Android foundation • on-device only", 14, false);
+        text("Local overview · Connected family space", 14, false);
+        button("Open connected family space", () -> startActivity(new Intent(this, FamilyActivity.class)));
         String role = prefs.getString("role", "");
         if (role.isEmpty()) {
             text("Who is using this phone?", 21, true);
@@ -61,8 +62,8 @@ public class MainActivity extends Activity {
         }
         text(role.equals("parent") ? "Your family dashboard" : "Your daily balance",24,true);
         if (role.equals("parent")) {
-            text("No child devices connected",20,true);
-            text("Secure cross-device pairing and remote reports are not connected in this first build. No child data is shown or uploaded.",16,false);
+            text("Manage your connected devices",20,true);
+            text("Open connected family space above to sign in, pair devices, view reports and send controls. The usage section below describes this phone only.",16,false);
         }
         text("This phone’s usage",21,true);
         if (!hasUsageAccess()) {
@@ -122,3 +123,4 @@ public class MainActivity extends Activity {
         if(count==0) text("No activity available yet. Use a few apps and refresh.",16,false);
     }
 }
+

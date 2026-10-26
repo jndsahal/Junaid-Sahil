@@ -142,6 +142,34 @@ class APITest(unittest.TestCase):
         restarted=API(self.path)
         self.assertEqual(restarted.handle('GET','/devices',token=self.parent)[1]['devices'][0]['id'],self.did)
 
+    def test_telemetry_authorization_validation_and_location_retention(self):
+        route=f'/devices/{self.did}/telemetry'
+        report={'apps':[{'package':'com.example.game','name':'Game','minutes':12}], 'location':{'latitude':25.1,'longitude':56.2},'managed':True,'usageEnabled':True}
+        self.fails(403,'POST',route,report,self.parent)
+        self.call('POST',route,report,self.child)
+        self.fails(404,'GET',route,token=self.other)
+        result=self.call('GET',route,token=self.parent)['report']
+        self.assertEqual(result['apps'][0]['minutes'],12)
+        stamp=result['location_at']
+        del report['location']
+        self.call('POST',route,report,self.child)
+        result=self.call('GET',route,token=self.parent)['report']
+        self.assertEqual(result['location_at'],stamp)
+        self.assertEqual(result['location']['latitude'],25.1)
+        result['location_at']=0
+        with self.api.connection() as db: db.execute('UPDATE telemetry SET payload=? WHERE device_id=?',(json.dumps(result),self.did))
+        self.assertIsNone(self.call('GET',route,token=self.parent)['report']['location'])
+        self.fails(400,'POST',route,{'location':{'latitude':999,'longitude':1}},self.child)
+
+    def test_rtc_configuration_requires_authentication(self):
+        self.fails(401,'GET','/rtc/config')
+        import unittest.mock
+        with unittest.mock.patch.dict(os.environ,{'KINORA_TURN_URLS':'turn:relay.example.com:3478','KINORA_TURN_SECRET':'test-only-secret'}):
+            result=self.call('GET','/rtc/config',token=self.child)
+            self.assertTrue(result['relayConfigured'])
+            self.assertEqual(result['iceServers'][0]['urls'],['turn:relay.example.com:3478'])
+            self.assertNotIn('test-only-secret',json.dumps(result))
+
     def test_http_transport(self):
         server=make_server(self.path,port=0)
         thread=threading.Thread(target=server.serve_forever,daemon=True)
@@ -151,6 +179,9 @@ class APITest(unittest.TestCase):
             with urllib.request.urlopen(base+'/health') as response:
                 self.assertEqual(json.load(response)['status'],'ok')
                 self.assertEqual(response.headers['Cache-Control'],'no-store')
+            with urllib.request.urlopen(base+'/ui') as response:
+                self.assertIn("frame-src 'none'",response.headers['Content-Security-Policy'])
+                self.assertIn(b'Kinora',response.read())
             request=urllib.request.Request(base+'/devices',headers={'Authorization':'Bearer '+self.parent})
             with urllib.request.urlopen(request) as response:
                 self.assertEqual(len(json.load(response)['devices']),1)

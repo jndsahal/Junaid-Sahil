@@ -65,7 +65,7 @@ Commands are durable and expire after 24 hours. A newer command for the same pac
 
 An accepted request means **pending**, not blocked. The Android client must enforce the operation using an appropriate platform-supported management capability and only then acknowledge `applied`. If enrollment or permissions do not permit enforcement, return `unsupported`; report platform failures as `failed`. Protect emergency calling, default dialer, launcher, system UI, settings, accessibility necessities and Kinora itself using runtime role/package checks as well as the backend's basic protected package list. Do not block arbitrary system packages just because the API accepts a syntactically valid name. Server policy is not a substitute for Android enforcement.
 
-The existing Android starter has not yet been wired to these endpoints and cannot enforce remote app blocking.
+The Android connected client now consumes these endpoints. Actual enforcement requires Device Owner enrollment; foreground sync and periodic background reconciliation report platform results. Physical-device enforcement remains unverified.
 
 ## Camera / WebRTC contract
 
@@ -81,10 +81,14 @@ Client requirements:
 - Do not enable microphone or recording implicitly.
 - Provision authenticated TURN for reliable connections across mobile networks. TURN hosting/credentials and native WebRTC capture/rendering are not included in this backend.
 
-The API carries signaling only; it does not capture, relay or record video. The existing Android app does not yet contain a WebRTC client. Camera video is therefore not end-to-end functional yet.
+The API carries signaling only; it does not capture, relay or record video. The shared web client now implements consent-gated WebRTC capture/rendering inside the Android WebView and supported browsers. `compose.yaml` supplies a TURN deployment configuration. Real video transport and physical camera operation remain unverified in this environment.
 
 ## Verified
 
-13 automated tests pass: auth/logout, pairing consent/expiry/replay and race, cross-family/device access isolation, command lifecycle and supersession, camera approval/denial/expiry/signaling/stop, revocation/account deletion, hashed credentials, failed-attempt rate limits, restart persistence and actual HTTP requests.
+15 automated backend tests pass (plus a mocked-media UI/API integration test): auth/logout, pairing consent/expiry/replay and race, cross-family/device access isolation, command lifecycle and supersession, camera approval/denial/expiry/signaling/stop, revocation/account deletion, hashed credentials, failed-attempt rate limits, restart persistence and actual HTTP requests.
 
-Not verified: deployment, Android compilation, phone integration, physical-device app enforcement, camera transport, TURN connectivity or production load/security review.
+Android compilation and signed development APK generation passed using SDK tools. Not verified: live deployment, physical-phone behavior, app enforcement, real camera transport, TURN connectivity or production load/security review.
+
+## Connected interface and deployment
+
+Open `/ui` for the parent/child interface. Static assets are served with a strict same-origin CSP. Authenticated `/rtc/config` returns time-limited TURN credentials from `KINORA_TURN_URLS` and `KINORA_TURN_SECRET`. `/devices/{id}/telemetry` accepts child-only inventory/usage/location updates; the owning parent reads them with GET. Reports expire from reads after 24 hours, and one-time location keeps its own timestamp across inventory refreshes. No background geolocation is requested. See [deployment instructions](../DEPLOYMENT.md).
